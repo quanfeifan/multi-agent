@@ -1,0 +1,193 @@
+# Agent Configuration Schema
+# Multi-Agent Framework - Contract Definition
+#
+# This schema defines how to configure AI agents in the framework.
+# Agents are AI entities that can reason, call tools, and complete tasks.
+
+# Agent definition with tool access and LLM configuration
+agent:
+  type: object
+  required:
+    - name
+    - role
+    - system_prompt
+    - tools
+    - llm_config
+  properties:
+    name:
+      type: string
+      # pattern: 正则表达式模式，用于验证字段格式
+      # ^[a-z][a-z0-9_]*$ 表示：以小写字母开头，后面可以是小写字母、数字或下划线
+      pattern: '^[a-z][a-z0-9_]*$'
+      description: Unique agent identifier (snake_case)
+      example: "web_researcher"
+
+    role:
+      type: string
+      description: Agent's role and purpose (描述代理的角色和职责)
+      example: "Searches the web and summarizes findings"
+
+    system_prompt:
+      type: string
+      description: System instruction for the LLM (发送给大模型的系统提示词)
+      example: "You are a research assistant. Search for information and provide accurate summaries."
+
+    tools:
+      type: array
+      items:
+        type: string
+      description: List of available tool names from MCP servers (可用的 MCP 工具名称列表)
+      example: ["web_search", "page_fetch"]
+
+    max_iterations:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 10
+      description: Maximum reasoning iterations before giving up (最大推理迭代次数)
+
+    llm_config:
+      type: object
+      required:
+        - endpoint
+        - model
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          description: |
+            LLM API base URL (大模型 API 的基础地址)
+            支持任何 OpenAI 兼容的 API，包括：
+            - OpenAI: https://api.openai.com/v1
+            - DeepSeek: https://api.deepseek.com/v1
+            - GLM (智谱): https://open.bigmodel.cn/api/paas/v4
+            - Ollama (本地): http://localhost:11434/v1
+            - 其他兼容 OpenAI API 格式的服务
+          example: "https://api.openai.com/v1"
+
+        model:
+          type: string
+          description: |
+            Model identifier (模型标识符)
+            示例：
+            - OpenAI: gpt-4, gpt-3.5-turbo
+            - DeepSeek: deepseek-chat, deepseek-coder
+            - GLM: glm-4-plus, glm-4-flash
+            - Ollama: llama2, mistral, codellama
+          example: "gpt-4"
+
+        api_key_env:
+          type: string
+          description: |
+            Environment variable containing API key
+            (包含 API 密钥的环境变量名)
+            框架会在运行时从环境变量中读取实际的密钥值
+          example: "OPENAI_API_KEY"
+
+        api_type:
+          type: string
+          enum: [openai, deepseek, glm, ollama, custom]
+          default: openai
+          description: |
+            API provider type for provider-specific optimizations
+            (API 提供商类型，用于特定提供商的优化)
+            - openai: 标准的 OpenAI API
+            - deepseek: DeepSeek API（兼容 OpenAI 格式）
+            - glm: 智谱 GLM API（兼容 OpenAI 格式）
+            - ollama: 本地 Ollama 服务
+            - custom: 其他自定义兼容服务
+
+    temperature:
+      type: number
+      minimum: 0
+      maximum: 2
+      default: 0.7
+      description: |
+        LLM sampling temperature
+        (大模型采样温度，控制输出的随机性)
+        - 0.0-0.3: 更确定性的输出，适合代码、事实问答
+        - 0.4-0.7: 平衡的创造性和确定性
+        - 0.8-2.0: 更有创造性的输出，适合创意写作
+
+# Example agent configurations (示例配置)
+examples:
+  # OpenAI GPT-4 示例
+  openai_agent:
+    name: web_researcher
+    role: "Searches the web and summarizes findings"
+    system_prompt: |
+      You are a research assistant. Your job is to:
+      1. Search for information using the web_search tool
+      2. Fetch and read relevant pages using page_fetch
+      3. Synthesize findings into a clear summary
+      Always cite your sources.
+    tools: [web_search, page_fetch]
+    max_iterations: 10
+    llm_config:
+      endpoint: "https://api.openai.com/v1"
+      model: "gpt-4"
+      api_key_env: "OPENAI_API_KEY"
+      api_type: openai
+    temperature: 0.7
+
+  # DeepSeek 示例（国产大模型，性价比高）
+  deepseek_agent:
+    name: code_assistant
+    role: "Helps with code writing and debugging"
+    system_prompt: |
+      You are a coding assistant. Help users write, debug, and improve code.
+      Use available tools to test code when appropriate.
+    tools: [python_exec, file_read, file_write]
+    max_iterations: 10
+    llm_config:
+      endpoint: "https://api.deepseek.com/v1"
+      model: "deepseek-coder"
+      api_key_env: "DEEPSEEK_API_KEY"
+      api_type: deepseek
+    temperature: 0.3
+
+  # 智谱 GLM 示例（国产大模型）
+  glm_agent:
+    name: data_analyst
+    role: "Analyzes data and generates reports"
+    system_prompt: |
+      You are a data analyst. Process data using available tools
+      and provide clear, actionable insights.
+    tools: [csv_reader, data_visualize]
+    max_iterations: 8
+    llm_config:
+      endpoint: "https://open.bigmodel.cn/api/paas/v4"
+      model: "glm-4-flash"
+      api_key_env: "GLM_API_KEY"
+      api_type: glm
+    temperature: 0.5
+
+  # Ollama 本地模型示例
+  ollama_agent:
+    name: local_chat
+    role: "General purpose chat using local models"
+    system_prompt: |
+      You are a helpful assistant running locally.
+      Provide concise and accurate responses.
+    tools: []
+    max_iterations: 5
+    llm_config:
+      endpoint: "http://localhost:11434/v1"
+      model: "llama2"
+      api_key_env: "OLLAMA_API_KEY"  # Ollama 通常不需要 API key
+      api_type: ollama
+    temperature: 0.7
+
+# Validation rules (验证规则)
+rules:
+  - Agent names must be unique across the system (代理名称必须全局唯一)
+  - All tools must be defined in available MCP servers (所有工具必须在可用的 MCP 服务器中定义)
+  - api_key_env must be set in environment before execution (API 密钥环境变量必须在执行前设置)
+  - Different api_type may require different request formats (不同 api_type 可能需要不同的请求格式)
+
+# Usage notes (使用说明)
+usage: |
+  1. 创建代理配置文件（YAML 或 JSON 格式）
+  2. 配置 LLM API 凭证（设置环境变量）
+  3. 确保引用的工具在 MCP 服务器中可用
+  4. 通过框架加载代理并执行任务

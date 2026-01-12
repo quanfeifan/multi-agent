@@ -1,0 +1,650 @@
+# MCP Server Configuration Schema
+# Multi-Agent Framework - Contract Definition
+#
+# This schema defines how to configure MCP (Model Context Protocol) servers
+# that provide tools to agents in the framework.
+
+# MCP server configuration (MCP 服务器配置)
+mcp_servers:
+  type: object
+  # pattern: 正则表达式模式，用于服务器名称的格式验证
+  # ^[a-z][a-z0-9_-]*$ 表示：以小写字母开头，后面可以是小写字母、数字、下划线或连字符
+  patternProperties:
+    "^[a-z][a-z0-9_-]*$":
+      type: object
+      required:
+        - transport
+        - config
+      properties:
+        # description: 服务器的描述说明
+        description:
+          type: string
+          description: Human-readable server description
+          example: "Provides web search and page fetching tools"
+
+        # transport: 传输方式，定义如何连接到 MCP 服务器
+        transport:
+          type: string
+          enum: [stdio, sse, custom]
+          description: |
+            Transport type for connecting to the MCP server
+            (连接 MCP 服务器的传输方式)
+            - stdio: 标准输入/输出，用于本地进程通信
+              适用于本地运行的 MCP 服务器
+            - sse: Server-Sent Events，用于 HTTP 长连接
+              适用于远程 MCP 服务器或独立服务
+            - custom: 自定义传输方式
+              使用自定义 Python 类实现连接逻辑
+
+        # config: 连接配置，根据 transport 类型有不同的结构
+        config:
+          oneOf:
+            # stdio 配置（本地进程）
+            - type: object
+              required:
+                - command
+              properties:
+                command:
+                  type: string
+                  description: |
+                    Executable path for stdio transport
+                    (stdio 传输方式的可执行文件路径)
+                    可以是绝对路径或相对路径（相对于 PATH）
+                  example: "/usr/local/bin/mcp-server-search"
+
+                args:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    Command-line arguments
+                    (命令行参数列表)
+                  example: ["--port", "8080", "--verbose"]
+
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: |
+                    Environment variables for the server process
+                    (服务器进程的环境变量)
+                  example:
+                    API_KEY: "${ENV_VAR_NAME}"
+                    LOG_LEVEL: "debug"
+
+            # sse 配置（远程 HTTP 服务）
+            - type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: |
+                    SSE endpoint URL
+                    (SSE 端点的 URL 地址)
+                    必须以 http:// 或 https:// 开头
+                  example: "https://mcp.example.com/sse"
+
+                headers:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: |
+                    HTTP headers for SSE connection
+                    (SSE 连接的 HTTP 请求头)
+                    可用于添加认证信息等
+                  example:
+                    Authorization: "Bearer ${API_TOKEN}"
+                    User-Agent: "MultiAgentFramework/1.0"
+
+            # custom 配置（自定义传输方式）
+            - type: object
+              required:
+                - class_path
+              properties:
+                class_path:
+                  type: string
+                  description: |
+                    Python 类路径，用于自定义传输实现
+                    格式: "module.submodule:ClassName"
+                    类必须实现 MCPServerTransport 接口
+                  example: "myapp.transports:MyCustomTransport"
+
+                init_params:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    传递给自定义传输类的初始化参数
+                    根据自定义类的 __init__ 方法定义
+                  example:
+                    host: "localhost"
+                    port: 9999
+                    protocol: "websocket"
+
+        # enabled: 是否启用此服务器
+        enabled:
+          type: boolean
+          default: true
+          description: |
+            Whether this server is enabled
+            (是否启用此服务器)
+            - false: 服务器将被跳过，不加载工具
+
+        # auto_reconnect: 自动重连配置
+        auto_reconnect:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              default: true
+              description: Enable automatic reconnection on connection loss
+
+            max_attempts:
+              type: integer
+              minimum: 0
+              maximum: 10
+              default: 3
+              description: Maximum reconnection attempts (最大重连尝试次数)
+
+            backoff_seconds:
+              type: integer
+              minimum: 1
+              maximum: 60
+              default: 5
+              description: Seconds to wait between reconnect attempts (重连之间的等待秒数)
+
+# ============================================================================
+# 预置 MCP 服务器配置示例
+# ============================================================================
+
+examples:
+  # ------------------------------------------------------------
+  # 网络搜索 MCP 服务器（使用 Brave Search API）
+  # ------------------------------------------------------------
+  brave_search:
+    description: "Web search using Brave Search API (no API key required for basic usage)"
+    transport: sse
+    config:
+      url: "https://api.search.brave.com/res/v1/mcp/sse"
+      headers:
+        Accept: "application/json"
+    enabled: true
+    # 提供的工具: web_search, search_news
+    tools:
+      web_search:
+        description: "Search the web for information"
+        parameters:
+          query: "Search query string"
+          count: "Number of results (1-20, default 10)"
+      search_news:
+        description: "Search for recent news articles"
+        parameters:
+          query: "News search query"
+          timeframe: "Time range (24h, week, month)"
+
+  # ------------------------------------------------------------
+  # 网络搜索 MCP 服务器（使用 Tavily API）
+  # ------------------------------------------------------------
+  tavily_search:
+    description: "AI-optimized search API with comprehensive results"
+    transport: sse
+    config:
+      url: "https://api.tavily.com/mcp/sse"
+      headers:
+        Authorization: "Bearer ${TAVILY_API_KEY}"
+    enabled: true
+    # 提供的工具: tavily_search
+    tools:
+      tavily_search:
+        description: "Search the web with AI-optimized results"
+        parameters:
+          query: "Search query"
+          search_depth: "basic or deep"
+          max_results: "Number of results (1-10)"
+
+  # ------------------------------------------------------------
+  # 高德地图 MCP 服务器（提供地图、路线规划、地理编码等功能）
+  # ------------------------------------------------------------
+  amap_maps:
+    description: "高德地图服务 - 提供地图搜索、路线规划、POI 查询、地理编码等功能"
+    transport: stdio
+    config:
+      command: "python"
+      args: ["-m", "mcp_server_amap"]
+      env:
+        AMAP_API_KEY: "${AMAP_API_KEY}"
+        LOG_LEVEL: "info"
+    enabled: true
+    # 提供的工具列表
+    tools:
+      # 地图搜索
+      amap_text_search:
+        description: "关键字搜索 POI（兴趣点）"
+        parameters:
+          keywords: "搜索关键字（如：餐厅、加油站）"
+          city: "搜索城市（如：北京、上海）"
+        example: "搜索：北京市的咖啡店"
+      # 周边搜索
+      amap_around_search:
+        description: "周边搜索 - 查找指定位置附近的 POI"
+        parameters:
+          location: "中心点坐标或地址"
+          keywords: "搜索关键字"
+          radius: "搜索半径（米，1-50000）"
+        example: "查找：天安门附近 1000 米内的停车场"
+      # 路线规划
+      amap_route:
+        description: "路径规划 - 驾车、步行、骑行路线"
+        parameters:
+          origin: "起点坐标或地址"
+          destination: "终点坐标或地址"
+          mode: "出行方式（driving/walking/transit/bicycling）"
+        example: "规划：从北京站到鸟巢的驾车路线"
+      # 地理编码（地址 → 坐标）
+      amap_geocode:
+        description: "将详细地址转换为经纬度坐标"
+        parameters:
+          address: "详细地址"
+          city: "指定查询城市"
+        example: "将：北京市朝阳区阜通东大街6号 转换为坐标"
+      # 逆地理编码（坐标 → 地址）
+      amap_regeocode:
+        description: "将经纬度坐标转换为详细地址"
+        parameters:
+          location: "经纬度坐标（格式：经度,纬度）"
+        example: "将：116.397128,39.916527 转换为地址"
+      # 天气查询
+      amap_weather:
+        description: "查询指定城市的天气信息"
+        parameters:
+          city: "城市名称或 adcode"
+          extensions: "天气类型（base: 基础天气, all: 全部天气）"
+        example: "查询：上海市的天气情况"
+
+  # ------------------------------------------------------------
+  # GitHub MCP 服务器 - 代码仓库操作
+  # ------------------------------------------------------------
+  github:
+    description: "GitHub API integration - repository operations, issues, PRs"
+    transport: stdio
+    config:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      env:
+        GITHUB_TOKEN: "${GITHUB_TOKEN}"
+    enabled: true
+    tools:
+      github_create_issue: "Create GitHub issue"
+      github_list_issues: "List repository issues"
+      github_create_pr: "Create pull request"
+      github_read_file: "Read file from repository"
+
+  # ------------------------------------------------------------
+  # 文件系统 MCP 服务器 - 本地文件操作
+  # ------------------------------------------------------------
+  filesystem:
+    description: "Local file system operations (read, write, list files)"
+    transport: stdio
+    config:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"]
+    enabled: true
+    tools:
+      read_file: "Read file contents"
+      write_file: "Write to file"
+      list_directory: "List directory contents"
+      search_files: "Search for files by name"
+
+# ============================================================================
+# 自定义 MCP 服务器（Custom MCP Server）
+# ============================================================================
+
+custom_mcp_server:
+  description: |
+    框架完全支持用户自定义 MCP 服务器。
+    您可以通过以下三种方式创建自定义 MCP 服务器：
+
+  methods:
+    # 方式1: Python stdio 服务器
+    python_stdio:
+      description: "创建一个 Python MCP 服务器，通过标准输入/输出通信"
+      steps:
+        - "1. 创建 MCP 服务器类"
+        - "2. 实现工具注册和处理逻辑"
+        - "3. 在配置文件中引用"
+      example_server:
+        description: "my_mcp_server.py"
+        code: |
+          #!/usr/bin/env python3
+          import asyncio
+          from mcp.server import Server
+          from mcp.server.stdio import stdio_server
+
+          server = Server("my-custom-server")
+
+          @server.tool()
+          async def my_custom_tool(param1: str, param2: int) -> str:
+              """我的自定义工具"""
+              return f"收到: {param1}, 数字: {param2}"
+
+          @server.tool()
+          async def calculate(expression: str) -> str:
+              """安全地计算数学表达式"""
+              try:
+                  result = eval(expression, {"__builtins__": {}}, {})
+                  return f"结果: {result}"
+              except Exception as e:
+                  return f"错误: {e}"
+
+          async def main():
+              async with stdio_server() as (read_stream, write_stream):
+                  await server.run(
+                      read_stream,
+                      write_stream,
+                      server.create_initialization_options()
+                  )
+
+          if __name__ == "__main__":
+              asyncio.run(main())
+
+      example_config:
+        description: "在 mcp-tools.yaml 中配置"
+        yaml: |
+          my_custom_server:
+            description: "我的自定义 Python MCP 服务器"
+            transport: stdio
+            config:
+              command: "python"
+              args: ["/path/to/my_mcp_server.py"]
+              env:
+                LOG_LEVEL: "debug"
+            enabled: true
+
+    # 方式2: Python SSE 服务器
+    python_sse:
+      description: "创建一个通过 HTTP SSE 通信的 MCP 服务器"
+      steps:
+        - "1. 创建 FastAPI/Flask SSE 服务器"
+        - "2. 实现 MCP 协议的 SSE 端点"
+        - "3. 在配置文件中引用 URL"
+      example_server:
+        description: "my_sse_server.py"
+        code: |
+          #!/usr/bin/env python3
+          from fastapi import FastAPI
+          from fastapi.responses import StreamingResponse
+          from mcp.server import Server
+          import json
+
+          app = FastAPI()
+          server = Server("my-sse-server")
+
+          @server.tool()
+          async def process_data(data: str) -> str:
+              """处理数据的自定义工具"""
+              return f"已处理: {data}"
+
+          @app.get("/sse")
+          async def sse_endpoint():
+              async def event_stream():
+                  # SSE 通信逻辑
+                  yield "event: message\n"
+                  yield f"data: {json.dumps({'jsonrpc': '2.0', 'method': 'initialize'})}\n\n"
+              return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+      example_config:
+        description: "在 mcp-tools.yaml 中配置"
+        yaml: |
+          my_sse_server:
+            description: "我的自定义 SSE MCP 服务器"
+            transport: sse
+            config:
+              url: "http://localhost:8000/sse"
+              headers:
+                Authorization: "Bearer ${MY_SERVER_TOKEN}"
+            enabled: true
+
+    # 方式3: 自定义传输类
+    custom_transport:
+      description: "实现自定义传输类来支持任何协议"
+      steps:
+        - "1. 继承 MCPServerTransport 基类"
+        - "2. 实现连接、发送、接收方法"
+        - "3. 在配置中使用 class_path 引用"
+      example_transport:
+        description: "my_transports.py"
+        code: |
+          #!/usr/bin/env python3
+          from abc import ABC, abstractmethod
+          import asyncio
+          import websockets
+
+          class WebSocketMCPTransport:
+              """使用 WebSocket 协议的自定义 MCP 传输"""
+
+              def __init__(self, host: str, port: int, path: str = "/mcp"):
+                  self.host = host
+                  self.port = port
+                  self.path = path
+                  self.websocket = None
+
+              async def connect(self):
+                  """建立 WebSocket 连接"""
+                  uri = f"ws://{self.host}:{self.port}{self.path}"
+                  self.websocket = await websockets.connect(uri)
+
+              async def send(self, data: dict):
+                  """发送数据到 MCP 服务器"""
+                  await self.websocket.send(json.dumps(data))
+
+              async def receive(self) -> dict:
+                  """从 MCP 服务器接收数据"""
+                  message = await self.websocket.recv()
+                  return json.loads(message)
+
+              async def close(self):
+                  """关闭连接"""
+                  if self.websocket:
+                      await self.websocket.close()
+
+      example_config:
+        description: "在 mcp-tools.yaml 中配置"
+        yaml: |
+          my_websocket_server:
+            description: "使用 WebSocket 连接的自定义 MCP 服务器"
+            transport: custom
+            config:
+              class_path: "myapp.transports:WebSocketMCPTransport"
+              init_params:
+                host: "localhost"
+                port: 8765
+                path: "/mcp"
+            enabled: true
+
+  # 预置工具模板 - 快速创建自定义工具
+  tool_templates:
+    http_api_wrapper:
+      description: "将任何 HTTP API 包装成 MCP 工具"
+      template: |
+        from mcp.server import Server
+        import aiohttp
+
+        server = Server("http-api-wrapper")
+
+        @server.tool()
+        async def call_http_api(url: str, method: str = "GET") -> str:
+            """调用 HTTP API"""
+            async with aiohttp.ClientSession() as session:
+                async with session.request(method, url) as resp:
+                    return await resp.text()
+
+    database_query:
+      description: "将数据库查询包装成 MCP 工具"
+      template: |
+        from mcp.server import Server
+        import asyncpg
+
+        server = Server("database-wrapper")
+
+        @server.tool()
+        async def query_database(sql: str) -> str:
+            """执行 SQL 查询"""
+            conn = await asyncpg.connect("postgresql://...")
+            try:
+                result = await conn.fetch(sql)
+                return str(result)
+            finally:
+                await conn.close()
+
+    file_operations:
+      description: "自定义文件操作工具"
+      template: |
+        from mcp.server import Server
+        import os
+
+        server = Server("file-ops")
+
+        @server.tool()
+        async def read_file_lines(filepath: str, count: int = 10) -> str:
+            """读取文件前 N 行"""
+            try:
+                with open(filepath, 'r') as f:
+                    lines = [f.readline() for _ in range(count)]
+                return ''.join(lines)
+            except Exception as e:
+                return f"Error: {e}"
+
+# ============================================================================
+# 开发自定义 MCP 服务器的完整示例
+# ============================================================================
+
+custom_server_full_example:
+  description: "一个完整的自定义 MCP 服务器示例 - 微信 API 集成"
+
+  server_code: "wechat_mcp_server.py"
+  code_content: |
+    #!/usr/bin/env python3
+    """
+    微信 API MCP 服务器
+    提供微信消息发送、用户查询等功能
+    """
+    import os
+    import asyncio
+    from mcp.server import Server
+    from mcp.server.stdio import stdio_server
+    import aiohttp
+
+    WECHAT_API_BASE = os.getenv("WECHAT_API_BASE", "https://api.weixin.qq.com")
+    WECHAT_CORP_ID = os.getenv("WECHAT_CORP_ID")
+    WECHAT_CORP_SECRET = os.getenv("WECHAT_CORP_SECRET")
+
+    server = Server("wechat-server")
+
+    async def get_access_token():
+        """获取微信访问令牌"""
+        url = f"{WECHAT_API_BASE}/cgi-bin/gettoken"
+        params = {
+            "corpid": WECHAT_CORP_ID,
+            "corpsecret": WECHAT_CORP_SECRET
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params) as resp:
+                data = await resp.json()
+                return data.get("access_token")
+
+    @server.tool()
+    async def send_wechat_message(user_id: str, message: str) -> str:
+        """
+        发送微信消息
+
+        Args:
+            user_id: 微信用户 ID
+            message: 消息内容
+        """
+        token = await get_access_token()
+        url = f"{WECHAT_API_BASE}/cgi-bin/message/send?access_token={token}"
+        payload = {
+            "touser": user_id,
+            "msgtype": "text",
+            "agentid": 1,
+            "text": {"content": message}
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                result = await resp.json()
+                if result.get("errcode") == 0:
+                    return f"消息已发送给 {user_id}"
+                else:
+                    return f"发送失败: {result.get('errmsg')}"
+
+    @server.tool()
+    async def get_user_info(user_id: str) -> str:
+        """
+        获取微信用户信息
+
+        Args:
+            user_id: 微信用户 ID
+        """
+        token = await get_access_token()
+        url = f"{WECHAT_API_BASE}/cgi-bin/user/get?access_token={token}&userid={user_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                user = await resp.json()
+                return f"用户: {user.get('name')}, 部门: {user.get('department')}"
+
+    async def main():
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options()
+            )
+
+    if __name__ == "__main__":
+        asyncio.run(main())
+
+  config_file: "mcp-tools.yaml 中的配置"
+  config_content: |
+    wechat:
+      description: "微信企业号 API 集成"
+      transport: stdio
+      config:
+        command: "python"
+        args: ["/path/to/wechat_mcp_server.py"]
+        env:
+          WECHAT_CORP_ID: "${WECHAT_CORP_ID}"
+          WECHAT_CORP_SECRET: "${WECHAT_CORP_SECRET}"
+          WECHAT_API_BASE: "https://qyapi.weixin.qq.com"
+      enabled: true
+
+# ============================================================================
+# 环境变量配置
+# ============================================================================
+
+environment_example:
+  # 网络搜索 API
+  TAVILY_API_KEY: "tvly-xxxxxxxxxxxxx"
+  BRAVE_SEARCH_API_KEY: "BSxxxxxxxxxxxxx"
+
+  # 地图服务 API
+  AMAP_API_KEY: "xxxxxxxxxxxxxxxxxxxxx"  # 高德地图
+  BAIDU_MAP_AK: "xxxxxxxxxxxxxxxxxxxxx"  # 百度地图
+
+  # 代码托管
+  GITHUB_TOKEN: "ghp_xxxxxxxxxxxxxxx"
+
+  # 自定义服务 API
+  WECHAT_CORP_ID: "your_corp_id"
+  WECHAT_CORP_SECRET: "your_corp_secret"
+
+# ============================================================================
+# 验证规则
+# ============================================================================
+
+validation_rules:
+  - "服务器名称必须唯一（在配置中）"
+  - "stdio 传输的命令必须是可执行文件"
+  - "sse 传输的 URL 必须是有效的 HTTP(S) 地址"
+  - "custom 传输的类路径必须有效且实现必要接口"
+  - "引用的环境变量必须在运行时设置"
