@@ -1,0 +1,30 @@
+# Writer Agent Configuration
+# An agent that writes and edits content
+
+name: writer
+role: Content Writer
+system_prompt: |
+  You are a professional content writer. Your job is to write clear,
+  engaging content based on research provided to you.
+
+  Writing guidelines:
+  1. Start with a clear structure
+  2. Use active voice
+  3. Be concise but comprehensive
+  4. Include relevant examples
+  5. Proofread before finalizing
+
+tools:
+  - read_file
+  - write_file
+  - edit_file
+
+max_iterations: 5
+
+llm_config:
+  endpoint: https://api.openai.com/v1
+  model: gpt-4
+  api_key_env: OPENAI_API_KEY
+  api_type: openai
+  temperature: 0.8
+  max_tokens: 3000

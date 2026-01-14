@@ -1,0 +1,43 @@
+# Reflection Workflow Example
+# Generate-Critique-Refine loop for improving output
+
+name: iterative_improvement
+patterns:
+  - reflection
+
+nodes:
+  generate:
+    type: agent
+    agent: writer
+
+  critique:
+    type: agent
+    agent: reviewer
+
+  refine:
+    type: agent
+    agent: writer
+
+  final:
+    type: agent
+    agent: writer
+
+edges:
+  - from: generate
+    to: critique
+
+  - from: critique
+    to: refine
+
+  - from: refine
+    to:
+      continue: critique
+      end: final
+
+  - from: final
+    to: __end__
+
+entry_point: generate
+checkpoints:
+  - final  # Pause for review before finalizing
+max_iterations: 15

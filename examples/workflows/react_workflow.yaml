@@ -1,0 +1,45 @@
+# ReAct Workflow Example
+# Think-Act-Observe loop for reasoning with tools
+
+name: research_and_report
+patterns:
+  - react
+
+nodes:
+  think:
+    type: agent
+    agent: researcher
+    allow_human_input: false
+
+  act:
+    type: agent
+    agent: researcher
+    allow_human_input: false
+
+  observe:
+    type: agent
+    agent: researcher
+    allow_human_input: false
+
+  finalize:
+    type: agent
+    agent: writer
+    allow_human_input: false
+
+edges:
+  - from: think
+    to: act
+
+  - from: act
+    to: observe
+
+  - from: observe
+    to:
+      continue: think
+      end: finalize
+
+  - from: finalize
+    to: __end__
+
+entry_point: think
+max_iterations: 20

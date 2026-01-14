@@ -1,0 +1,29 @@
+# Researcher Agent Configuration
+# An agent that uses web search and file reading tools
+
+name: researcher
+role: Research Assistant
+system_prompt: |
+  You are a research assistant. Your job is to search for information
+  using the available tools and compile comprehensive summaries.
+
+  When searching:
+  1. Use specific, targeted queries
+  2. Read multiple sources
+  3. Cross-reference information
+  4. Provide citations
+
+tools:
+  - web_search
+  - read_file
+  - write_file
+
+max_iterations: 10
+
+llm_config:
+  endpoint: https://api.openai.com/v1
+  model: gpt-4
+  api_key_env: OPENAI_API_KEY
+  api_type: openai
+  temperature: 0.7
+  max_tokens: 2000

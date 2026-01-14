@@ -1,0 +1,35 @@
+# MCP Servers Configuration
+# Example Model Context Protocol server configurations
+
+filesystem:
+  transport: stdio
+  description: Filesystem access server
+  config:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-filesystem"
+      - /allowed/path
+    env: {}
+  enabled: true
+
+web_search:
+  transport: stdio
+  description: Web search server
+  config:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-brave-search"
+    env: {}
+  enabled: true
+
+# SSE server example
+# custom_api:
+#   transport: sse
+#   description: Custom API server
+#   config:
+#     url: https://api.example.com/mcp
+#     headers:
+#       Authorization: "Bearer ${API_TOKEN}"
+#   enabled: true
