@@ -148,3 +148,10 @@ Thumbs.db
 
 # Project specific
 multi-agent.json
+
+# 
+spec/
+.claude/
+.pytest_cache/
+.specify/
+CLAUDE.md
