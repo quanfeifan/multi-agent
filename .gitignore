@@ -150,7 +150,7 @@ Thumbs.db
 multi-agent.json
 
 # 
-spec/
+specs/
 
 .claude/
 

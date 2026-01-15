@@ -5,7 +5,7 @@ This module defines the Workflow entity for graph-based execution patterns.
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class NodeDef(BaseModel):
@@ -45,8 +45,7 @@ class EdgeDef(BaseModel):
     to: str | dict[str, str] = Field(..., description="Target node or conditional routing")
     condition: Optional[str] = Field(None, description="Optional condition expression")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class Workflow(BaseModel):

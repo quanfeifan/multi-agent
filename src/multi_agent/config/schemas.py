@@ -5,7 +5,7 @@ This module defines Pydantic models for validating configuration data.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class LLMConfig(BaseModel):
@@ -112,8 +112,7 @@ class EdgeDef(BaseModel):
     to: str | dict[str, str] = Field(..., description="Target node or conditional routing")
     condition: str | None = Field(None, description="Optional condition expression")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class WorkflowConfig(BaseModel):

@@ -14,13 +14,13 @@ class ToolCall(BaseModel):
 
     Attributes:
         id: Unique call ID (UUID v4)
-        server: MCP server name
+        server: MCP server name (optional, filled during execution)
         tool: Tool name
         arguments: Tool parameters
     """
 
     id: str = Field(..., description="Unique call ID (UUID v4)")
-    server: str = Field(..., description="MCP server name")
+    server: Optional[str] = Field(None, description="MCP server name")
     tool: str = Field(..., description="Tool name")
     arguments: dict[str, Any] = Field(default_factory=dict, description="Tool parameters")
 

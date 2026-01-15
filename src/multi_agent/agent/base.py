@@ -212,7 +212,11 @@ class BaseAgent:
 
             state = create_initial_state(self.agent.name, task_description)
         else:
-            state = initial_state
+            # Add the new task as a user message to the existing state
+            from ..models import Message
+
+            user_message = Message(role="user", content=task_description)
+            state = initial_state.add_message(user_message)
 
         steps = 0
         max_iterations = self.agent.max_iterations
