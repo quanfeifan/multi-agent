@@ -1,14 +1,21 @@
 # Single Agent Demo
 
-This demo shows how to use the multi-agent framework with a single agent. The agent can have conversations, answer questions, perform calculations, and maintain context across multiple turns.
+This demo shows how to use the multi-agent framework with a single agent. The agent can have conversations, answer questions, perform calculations, call tools, and maintain context across multiple turns.
 
 ## Features Demonstrated
 
+### Basic Demo
 1. **Single Agent Creation** - Create and configure an AI agent
 2. **Task Execution** - Execute tasks with reasoning loop
 3. **State Management** - Conversation history and context preservation
 4. **Multi-turn Conversations** - Maintain context across conversation turns
 5. **Error Handling** - Graceful error handling and status tracking
+
+### Tools Demo
+1. **Tool Calling** - Execute tools through the agent
+2. **MCP Protocol** - Standard Model Context Protocol for tool integration
+3. **Custom Tools** - Easy to add new tools via stdio or SSE
+4. **LLM Decision** - LLM decides which tool to call based on task
 
 ## Quick Start
 
@@ -104,6 +111,32 @@ Conversation Demo - Multi-turn with Context
 👤 User: What is 10 + 5?
 🤖 Assistant: 10 + 5 equals 15. Is there anything else I can help you with, Alice?
 ```
+
+## Tools Demo
+
+The `single_agent_tools_demo.py` demonstrates tool calling with MCP (Model Context Protocol).
+
+**Important Note**: Tool calling requires an LLM that supports OpenAI function calling format. The SiliconFlow Qwen model does not support this feature. For tool calling to work, use a model like GPT-4.
+
+```bash
+# Terminal 1: Start the tool server
+PYTHONPATH=src python3 examples/demo/tools_server.py
+
+# Terminal 2: Run the demo (with GPT-4 or other model supporting function calling)
+OPENAI_API_KEY=your-gpt4-key \
+OPENAI_BASE_URL=https://api.openai.com/v1 \
+DEFAULT_MODEL=gpt-4 \
+PYTHONPATH=src python3 examples/demo/single_agent_tools_demo.py
+```
+
+### Available Tools
+
+| Tool | Description | Example Usage |
+|------|-------------|---------------|
+| `calculator` | Perform mathematical calculations | "What is 25 * 34?" |
+| `read_file` | Read file contents | "Read the file README.md" |
+| `list_files` | List files in directory | "List files in current directory" |
+| `get_time` | Get current date/time | "What is the current time?" |
 
 ### Interactive Mode (--interactive)
 
@@ -280,8 +313,10 @@ Error code: 403 - RPM limit exceeded
 
 ## Next Steps
 
+- **Try the tools demo**: Requires a model with function calling support (e.g., GPT-4)
 - **Modify the agent**: Change `system_prompt` to customize behavior
-- **Add tools**: See tool examples in `examples/mcp-servers/`
+- **Create custom tools**: See `tools_server.py` for an example MCP server
+- **Explore MCP servers**: See tool examples in `examples/mcp-servers/`
 - **Try workflows**: Check workflow examples in `examples/workflows/`
 - **Explore supervisor pattern**: See agent configurations in `examples/agents/`
 

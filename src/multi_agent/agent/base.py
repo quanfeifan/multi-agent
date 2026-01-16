@@ -365,8 +365,8 @@ class BaseAgent:
         for msg in state.messages:
             message_dict: dict[str, Any] = {"role": msg.role, "content": msg.content}
 
-            # Add tool calls
-            if msg.tool_calls:
+            # Handle tool calls for assistant messages
+            if msg.role == "assistant" and msg.tool_calls:
                 message_dict["tool_calls"] = [
                     {
                         "id": tc.id,
@@ -378,6 +378,9 @@ class BaseAgent:
                     }
                     for tc in msg.tool_calls
                 ]
+            # Handle tool_call_id for tool messages
+            elif msg.role == "tool" and msg.tool_calls:
+                message_dict["tool_call_id"] = msg.tool_calls[0].id
 
             messages.append(message_dict)
 
