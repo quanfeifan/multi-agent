@@ -15,24 +15,9 @@ A Python framework for orchestrating AI agents with tool integration, state mach
 
 ## Installation
 
-### From PyPI (when published)
-
-```bash
-pip install multi-agent-framework
-```
-
-### From Source
-
-```bash
-git clone https://github.com/your-org/multi-agent.git
-cd multi-agent
-pip install -e .
-```
-
 ### Development Installation
 
 ```bash
-git clone https://github.com/your-org/multi-agent.git
 cd multi-agent
 pip install -e ".[dev]"
 ```
@@ -46,42 +31,11 @@ export OPENAI_API_KEY="sk-xxxxxxxxxxxxx"
 # or use DeepSeek, GLM, Ollama, etc.
 ```
 
-### 2. Create an agent configuration
-
-```yaml
-# ~/.multi-agent/agents/researcher.yaml
-name: web_researcher
-role: "Searches the web and summarizes findings"
-system_prompt: |
-  You are a research assistant. Use web_search to find information
-  and synthesize findings into a clear summary.
-tools: [web_search]
-max_iterations: 10
-llm_config:
-  endpoint: "https://api.openai.com/v1"
-  model: "gpt-4"
-  api_key_env: "OPENAI_API_KEY"
-  api_type: openai
-  temperature: 0.7
+### 2. Run the demo
+```bash
+python examples/demo/llm_with_builtin_tools_demo.py
 ```
 
-### 3. Run your first task
-
-```python
-from multi_agent import Agent, Task
-
-# Load agent
-agent = Agent.from_config("~/.multi-agent/agents/researcher.yaml")
-
-# Create and execute task
-task = Task(
-    description="What are the latest developments in quantum computing?",
-    agent=agent
-)
-
-result = task.run()
-print(result.output)
-```
 
 
 ## Requirements
