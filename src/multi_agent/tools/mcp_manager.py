@@ -278,58 +278,287 @@ class MCPToolManager:
 
 
 class ToolExecutor:
-    """Executes tools with timeout and error handling.
+    """Unified executor for both builtin and MCP tools with parallel execution support.
 
-    Wraps MCPToolManager for safer tool execution.
+    Provides a single interface for executing local builtin tools (high performance)
+    and external MCP tools (extensible via JSON-RPC).
     """
 
     def __init__(
         self,
-        manager: MCPToolManager,
+        manager: Optional[MCPToolManager] = None,
+        builtin_registry: Optional["BuiltinRegistry"] = None,
         default_timeout: int = 300,
     ) -> None:
         """Initialize the tool executor.
 
         Args:
-            manager: MCP tool manager
+            manager: Optional MCP tool manager for external tools
+            builtin_registry: Optional builtin registry for local tools
             default_timeout: Default timeout in seconds
         """
+        from .builtin import get_builtin_registry
+
         self.manager = manager
+        self.builtin_registry = builtin_registry or get_builtin_registry()
         self.default_timeout = default_timeout
+        self._tool_server_cache: dict[str, str] = {}  # tool_name -> server
 
     async def execute(
         self,
-        server: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        server: Optional[str] = None,
+        timeout: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Execute a single tool (builtin or MCP).
+
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments
+            server: Optional server hint for MCP tools
+            timeout: Execution timeout in seconds
+
+        Returns:
+            Result in MCP format: {"content": [{"type": "text", "text": "..."}]}
+
+        Raises:
+            TimeoutError: If execution times out
+            RuntimeError: If tool not found or execution fails
+        """
+        timeout = timeout or self.default_timeout
+
+        # Check if it's a builtin tool
+        if self.builtin_registry.has(tool_name):
+            return await self._execute_builtin(tool_name, arguments)
+
+        # Otherwise, use MCP manager
+        if not self.manager:
+            return {
+                "content": [{"type": "text", "text": f"Tool not found: {tool_name}"}]
+            }
+
+        if server:
+            return await asyncio.wait_for(
+                self.manager.execute_tool(server, tool_name, arguments),
+                timeout=timeout,
+            )
+        else:
+            # Auto-detect server
+            server = await self._find_server_for_tool(tool_name)
+            if server:
+                return await asyncio.wait_for(
+                    self.manager.execute_tool(server, tool_name, arguments),
+                    timeout=timeout,
+                )
+            else:
+                return {
+                    "content": [{"type": "text", "text": f"Tool not found: {tool_name}"}]
+                }
+
+    async def execute_batch(
+        self,
+        tool_calls: list[dict[str, Any]],
+        timeout: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        """Execute multiple tools in parallel.
+
+        Args:
+            tool_calls: List of tool call dicts from LLM
+                [{"id": "call_1", "function": {"name": "...", "arguments": "..."}}]
+            timeout: Timeout per tool in seconds
+
+        Returns:
+            List of results in same order as tool_calls
+        """
+        import json
+
+        timeout = timeout or self.default_timeout
+
+        # Separate builtin and MCP tools
+        builtin_tasks = []
+        mcp_tasks = []
+        task_mapping = []  # (index, call_id, tool_name)
+
+        for idx, call in enumerate(tool_calls):
+            func = call.get("function", {})
+            tool_name = func.get("name", "")
+            arguments_str = func.get("arguments", "{}")
+
+            try:
+                arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+            except json.JSONDecodeError:
+                arguments = {}
+
+            task_mapping.append((idx, call.get("id", ""), tool_name))
+
+            if self.builtin_registry.has(tool_name):
+                # Builtin tool
+                task = self._execute_builtin_wrapper(tool_name, arguments, call.get("id", ""))
+                builtin_tasks.append(task)
+            else:
+                # MCP tool
+                task = self._execute_mcp_wrapper(tool_name, arguments, call.get("id", ""), timeout)
+                mcp_tasks.append(task)
+
+        # Execute all in parallel
+        all_tasks = builtin_tasks + mcp_tasks
+        results = await asyncio.gather(*all_tasks, return_exceptions=True)
+
+        # Order results by original index
+        ordered_results = [None] * len(tool_calls)
+        for (idx, call_id, tool_name), result in zip(task_mapping, results):
+            if isinstance(result, Exception):
+                ordered_results[idx] = {
+                    "tool_call_id": call_id,
+                    "content": [{"type": "text", "text": f"Error: {result}"}]
+                }
+            else:
+                ordered_results[idx] = result
+
+        return ordered_results
+
+    async def _execute_builtin(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Execute a builtin tool.
+
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments
+
+        Returns:
+            Result in MCP format
+        """
+        from .builtin.result import ToolResult
+
+        try:
+            tool = self.builtin_registry.get(tool_name)
+            result = await tool.execute(**arguments)
+            if isinstance(result, ToolResult):
+                return {
+                    "content": [{"type": "text", "text": result.to_content()}]
+                }
+            return {
+                "content": [{"type": "text", "text": str(result)}]
+            }
+        except Exception as e:
+            logger.error(f"Error executing builtin tool {tool_name}: {e}")
+            return {
+                "content": [{"type": "text", "text": f"Error: {e}"}]
+            }
+
+    async def _execute_mcp(
+        self,
         tool_name: str,
         arguments: dict[str, Any],
         timeout: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Execute a tool with timeout.
+        """Execute an MCP tool.
 
         Args:
-            server: Server name
             tool_name: Tool name
             arguments: Tool arguments
-            timeout: Timeout in seconds (default: default_timeout)
+            timeout: Execution timeout
 
         Returns:
-            Tool result
-
-        Raises:
-            TimeoutError: If execution times out
-            RuntimeError: If server not found or execution fails
+            Result in MCP format
         """
-        timeout = timeout or self.default_timeout
+        if not self.manager:
+            return {
+                "content": [{"type": "text", "text": f"Tool not found: {tool_name}"}]
+            }
 
         try:
+            server = await self._find_server_for_tool(tool_name)
+            if not server:
+                return {
+                    "content": [{"type": "text", "text": f"Tool not found: {tool_name}"}]
+                }
+
             result = await asyncio.wait_for(
                 self.manager.execute_tool(server, tool_name, arguments),
-                timeout=timeout,
+                timeout=timeout or self.default_timeout,
             )
-            return result
+            return {
+                "content": result.get("content", [{"type": "text", "text": str(result)}])
+            }
         except asyncio.TimeoutError:
-            logger.warning(f"Tool execution timed out: {server}:{tool_name} after {timeout}s")
-            raise TimeoutError(f"Tool execution timed out: {server}:{tool_name}")
+            return {
+                "content": [{"type": "text", "text": f"Timeout executing {tool_name}"}]
+            }
+        except Exception as e:
+            logger.error(f"Error executing MCP tool {tool_name}: {e}")
+            return {
+                "content": [{"type": "text", "text": f"Error: {e}"}]
+            }
+
+    async def _find_server_for_tool(self, tool_name: str) -> Optional[str]:
+        """Find which MCP server provides this tool.
+
+        Args:
+            tool_name: Tool name to find
+
+        Returns:
+            Server name or None
+        """
+        if not self.manager:
+            return None
+
+        # Check cache
+        if tool_name in self._tool_server_cache:
+            return self._tool_server_cache[tool_name]
+
+        # Search all servers
+        for server_name in self.manager.servers:
+            key = f"{server_name}:{tool_name}"
+            if key in self.manager.tools:
+                self._tool_server_cache[tool_name] = server_name
+                return server_name
+
+        return None
+
+    async def _execute_builtin_wrapper(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        call_id: str,
+    ) -> dict[str, Any]:
+        """Wrapper for builtin tool execution in batch.
+
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments
+            call_id: Tool call ID
+
+        Returns:
+            Result with tool_call_id
+        """
+        result = await self._execute_builtin(tool_name, arguments)
+        result["tool_call_id"] = call_id
+        return result
+
+    async def _execute_mcp_wrapper(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        call_id: str,
+        timeout: Optional[int],
+    ) -> dict[str, Any]:
+        """Wrapper for MCP tool execution in batch.
+
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments
+            call_id: Tool call ID
+            timeout: Execution timeout
+
+        Returns:
+            Result with tool_call_id
+        """
+        result = await self._execute_mcp(tool_name, arguments, timeout)
+        result["tool_call_id"] = call_id
+        return result
+
+    # Legacy methods for backward compatibility
 
     async def execute_with_fallback(
         self,
@@ -339,7 +568,7 @@ class ToolExecutor:
         fallback_tools: list[tuple[str, str]],
         timeout: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Execute a tool with fallback options.
+        """Execute a tool with fallback options (legacy MCP-only method).
 
         Args:
             server: Server name
@@ -354,12 +583,19 @@ class ToolExecutor:
         Raises:
             RuntimeError: If all attempts fail
         """
+        if not self.manager:
+            raise RuntimeError(f"Cannot execute MCP tool: no MCP manager configured")
+
         attempts = [(server, tool_name)] + fallback_tools
 
         for attempt_server, attempt_tool in attempts:
             try:
                 logger.debug(f"Attempting tool: {attempt_server}:{attempt_tool}")
-                return await self.execute(attempt_server, attempt_tool, arguments, timeout)
+                result = await asyncio.wait_for(
+                    self.manager.execute_tool(attempt_server, attempt_tool, arguments),
+                    timeout=timeout or self.default_timeout,
+                )
+                return result
             except (TimeoutError, RuntimeError) as e:
                 logger.warning(f"Tool attempt failed: {attempt_server}:{attempt_tool} - {e}")
                 continue
