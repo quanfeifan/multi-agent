@@ -122,14 +122,42 @@ class MCPStdioTransport(MCPTransport):
                 await self._read_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                pass  # Ignore errors during cleanup
 
         if self.process:
-            self.process.terminate()
+            # Close stdin/stdout/stderr before terminating
             try:
-                await asyncio.wait_for(self.process.wait(), timeout=5.0)
+                if self.process.stdin and not self.process.stdin.is_closing():
+                    self.process.stdin.close()
+            except Exception:
+                pass  # Ignore errors during cleanup
+
+            try:
+                if self.process.stdout and not self.process.stdout.is_closing():
+                    self.process.stdout.close()
+            except Exception:
+                pass
+
+            try:
+                if self.process.stderr and not self.process.stderr.is_closing():
+                    self.process.stderr.close()
+            except Exception:
+                pass
+
+            # Terminate the process
+            try:
+                if self.process.returncode is None:  # Only if still running
+                    self.process.terminate()
+                    await asyncio.wait_for(self.process.wait(), timeout=5.0)
             except asyncio.TimeoutError:
-                self.process.kill()
-                await self.process.wait()
+                try:
+                    self.process.kill()
+                    await self.process.wait()
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
         # Cancel pending requests
         for future in self._pending_requests.values():
@@ -239,6 +267,9 @@ class MCPSSETransport(MCPTransport):
     """MCP SSE transport using HTTP Server-Sent Events.
 
     Communicates with MCP server via SSE HTTP endpoint.
+    Supports two modes:
+    - POST-based: Standard JSON-RPC over HTTP POST (MCP spec)
+    - SSE-based: GET for connection + POST for messages (Zhipu style)
     """
 
     def __init__(self, config: MCPServerConfigSSE, server_name: str) -> None:
@@ -253,6 +284,7 @@ class MCPSSETransport(MCPTransport):
         self.session: aiohttp.ClientSession | None = None
         self._request_id = 0
         self._connected = False
+        self._use_sse_mode = False  # Will be detected during connect
 
     async def connect(self) -> None:
         """Connect to SSE endpoint."""
@@ -260,21 +292,35 @@ class MCPSSETransport(MCPTransport):
 
         self.session = aiohttp.ClientSession()
 
-        # Initialize connection
-        init_message = MCPMessage(
-            method="initialize",
-            params={
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "multi-agent-framework",
-                    "version": "0.1.0",
+        # Try to detect which mode the server supports
+        # First try POST (standard MCP over HTTP)
+        try:
+            init_message = MCPMessage(
+                method="initialize",
+                params={
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "multi-agent-framework",
+                        "version": "0.1.0",
+                    },
                 },
-            },
-        )
-        await self.send_message(init_message)
-
-        self._connected = True
+            )
+            await self._send_post(init_message)
+            self._use_sse_mode = False
+            self._connected = True
+            logger.info(f"Connected to '{self.server_name}' using POST mode")
+        except Exception as e:
+            logger.debug(f"POST mode failed: {e}, trying SSE mode...")
+            # Try SSE mode (GET for connection)
+            try:
+                await self._send_get_init()
+                self._use_sse_mode = True
+                self._connected = True
+                logger.info(f"Connected to '{self.server_name}' using SSE mode")
+            except Exception as e2:
+                logger.error(f"SSE mode also failed: {e2}")
+                raise RuntimeError(f"Failed to connect to MCP server: {e2}")
 
     async def disconnect(self) -> None:
         """Close SSE connection."""
@@ -283,7 +329,7 @@ class MCPSSETransport(MCPTransport):
         self._connected = False
 
     async def send_message(self, message: MCPMessage) -> MCPMessage:
-        """Send a message via HTTP POST.
+        """Send a message.
 
         Args:
             message: Message to send
@@ -294,6 +340,20 @@ class MCPSSETransport(MCPTransport):
         if not self.session or not self._connected:
             raise RuntimeError("Not connected to MCP server")
 
+        if self._use_sse_mode:
+            return await self._send_post_to_sse_endpoint(message)
+        else:
+            return await self._send_post(message)
+
+    async def _send_post(self, message: MCPMessage) -> MCPMessage:
+        """Send message via HTTP POST.
+
+        Args:
+            message: Message to send
+
+        Returns:
+            Response message
+        """
         # Generate request ID
         self._request_id += 1
         message.id = self._request_id
@@ -311,7 +371,58 @@ class MCPSSETransport(MCPTransport):
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30.0),
             ) as response:
-                response_data = await response.json()
+                text = await response.text()
+                response_data = json.loads(text) if text.strip() else {}
+                return MCPMessage(**response_data)
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"MCP request timed out: {message.method}")
+
+    async def _send_get_init(self) -> None:
+        """Send GET request to establish SSE connection (for SSE mode servers like Zhipu).
+
+        This is used for servers that require GET to establish SSE connection.
+        """
+        headers = self.config.headers.copy()
+
+        async with self.session.get(
+            self.config.url,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as response:
+            # For SSE, we just need to establish the connection
+            # The actual message exchange will happen via POST
+            if response.status != 200:
+                text = await response.text()
+                raise RuntimeError(f"SSE connection failed: {response.status} - {text}")
+
+    async def _send_post_to_sse_endpoint(self, message: MCPMessage) -> MCPMessage:
+        """Send message to SSE endpoint via POST (for SSE mode servers).
+
+        Args:
+            message: Message to send
+
+        Returns:
+            Response message
+        """
+        # Generate request ID
+        self._request_id += 1
+        message.id = self._request_id
+
+        # Prepare headers
+        headers = {"Content-Type": "application/json"}
+        headers.update(self.config.headers)
+
+        # Send POST request
+        data = message.model_dump_json(exclude_none=True)
+        try:
+            async with self.session.post(
+                self.config.url,
+                data=data,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30.0),
+            ) as response:
+                text = await response.text()
+                response_data = json.loads(text) if text.strip() else {}
                 return MCPMessage(**response_data)
         except asyncio.TimeoutError:
             raise TimeoutError(f"MCP request timed out: {message.method}")

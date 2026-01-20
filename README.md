@@ -36,6 +36,32 @@ export OPENAI_API_KEY="sk-xxxxxxxxxxxxx"
 python examples/demo/llm_with_builtin_tools_demo.py
 ```
 
+## ModelScope MCP Server Integration
+
+This framework supports integrating MCP (Model Context Protocol) servers for extended capabilities like maps, search, and more.
+
+**Key Principle**: All MCP tools work through the same unified `ToolExecutor` interface as builtin tools. LLMs can call MCP tools seamlessly without knowing the tool source.
+
+**Documentation**:
+- [Integration Guide](docs/modelscope_mcp_integration.md) - Complete documentation with architecture explanation
+- [Quick Start](docs/quickstart_modelscope_mcp.md) - 5-minute setup guide
+
+**Quick Setup**:
+```bash
+# 1. Copy configuration template
+cp examples/config/mcp_servers_modelscope.yaml ~/.multi-agent/config/mcp_servers.yaml
+
+# 2. Set API key (for services like Amap)
+export AMAP_MAPS_API_KEY="your_api_key_here"
+
+# 3. Verify connection
+python examples/modelscope_mcp/amap_demo.py --verify
+```
+
+**Examples**:
+- [Amap Demo](examples/modelscope_mcp/amap_demo.py) - High德地图 (Geocoding, weather, routing)
+- [Configuration Template](examples/config/mcp_servers_modelscope.yaml) - YAML config reference
+
 
 
 ## Requirements
