@@ -1,0 +1,76 @@
+# ModelScope MCP服务器配置模板
+# ModelScope MCP Server Configuration Template
+#
+# 使用说明 / Usage:
+# 1. 复制需要的服务器配置到 ~/.multi-agent/config/mcp_servers.yaml
+#    Copy the desired server configuration to ~/.multi-agent/config/mcp_servers.yaml
+# 2. 设置必要的环境变量（如API密钥）
+#    Set required environment variables (e.g., API keys)
+# 3. 运行示例验证连接: python examples/modelscope_mcp/amap_demo.py --verify
+#    Verify connection: python examples/modelscope_mcp/amap_demo.py --verify
+
+# ============================================================================
+# 高德地图 MCP 服务器 / Amap MCP Server
+# ============================================================================
+# 功能 / Features: 地理编码、逆地理编码、天气查询、路线规划、周边搜索
+#                   Geocoding, reverse geocoding, weather, routing, POI search
+# 传输方式 / Transport: stdio (通过 npx 启动 / launched via npx)
+# 认证方式 / Auth: 需要 API Key / Requires API Key
+amap:
+  # 传输类型: stdio (标准输入输出) 或 sse (HTTP SSE)
+  # Transport type: stdio (standard I/O) or sse (HTTP SSE)
+  transport: stdio
+
+  # 服务器配置 / Server configuration
+  config:
+    # 启动命令 / Command to launch server
+    command: "npx"
+
+    # 命令参数 / Command arguments
+    # -y: 自动确认安装 npx 包 / Auto-confirm npx package installation
+    args: ["-y", "@amap/amap-maps-mcp-server"]
+
+    # 环境变量 / Environment variables
+    env:
+      # 高德地图 API 密钥 / Amap API Key
+      # 获取方式 / How to get: 访问 https://console.amap.com/ 注册并创建应用
+      #                       Visit https://console.amap.com/ to register and create app
+      # 使用方式 / Usage: export AMAP_MAPS_API_KEY="your_api_key_here"
+      AMAP_MAPS_API_KEY: "d5f7476d75020f5b1fd1c02b06230796"
+
+  # 服务器描述 / Server description
+  description: "高德地图服务 - 提供地理编码、天气、路线规划等功能 / Amap Maps Service - Geocoding, weather, routing, etc."
+
+  # 是否启用 / Whether enabled
+  enabled: false
+
+# ============================================================================
+# 智谱 Wiki MCP 服务器 / Zhipu Wiki MCP Server
+# ============================================================================
+# 功能 / Features: 知识检索、智能问答
+#                   Knowledge retrieval, Q&A
+# 传输方式 / Transport: sse (HTTP Server-Sent Events)
+# 认证方式 / Auth: 需要智谱API密钥 / Requires Zhipu API key
+# 获取方式 / How to get: 访问 https://open.bigmodel.cn/ 注册并获取 API Key
+#                       Visit https://open.bigmodel.cn/ to register and get API key
+wiki:
+  # 传输类型: sse (HTTP Server-Sent Events)
+  # Transport type: sse (HTTP Server-Sent Events)
+  transport: sse
+
+  # 服务器配置 / Server configuration
+  config:
+    # SSE 端点 URL / SSE endpoint URL
+    url: "https://open.bigmodel.cn/api/mcp-broker/proxy/wiki/sse"
+
+    # HTTP 请求头 / HTTP headers
+    headers:
+      # Bearer Token 认证 / Bearer Token authentication
+      Authorization: "bc3526aa5b26489bb33a72a27095b634.nGVsWF9BhZb2mF3A"
+
+  # 服务器描述 / Server description
+  description: "智谱 Wiki 服务 - 提供知识检索和智能问答功能 / Zhipu Wiki Service - Knowledge retrieval and Q&A"
+
+  # 是否启用 / Whether enabled
+  enabled: true
+

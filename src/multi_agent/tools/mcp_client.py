@@ -285,6 +285,7 @@ class MCPSSETransport(MCPTransport):
         self._request_id = 0
         self._connected = False
         self._use_sse_mode = False  # Will be detected during connect
+        self._message_endpoint: str | None = None  # Dynamic endpoint for SSE mode
 
     async def connect(self) -> None:
         """Connect to SSE endpoint."""
@@ -316,6 +317,19 @@ class MCPSSETransport(MCPTransport):
             try:
                 await self._send_get_init()
                 self._use_sse_mode = True
+                # Now send the initialize request to the message endpoint
+                init_message = MCPMessage(
+                    method="initialize",
+                    params={
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "multi-agent-framework",
+                            "version": "0.1.0",
+                        },
+                    },
+                )
+                await self._send_post_to_sse_endpoint(init_message)
                 self._connected = True
                 logger.info(f"Connected to '{self.server_name}' using SSE mode")
             except Exception as e2:
@@ -381,19 +395,45 @@ class MCPSSETransport(MCPTransport):
         """Send GET request to establish SSE connection (for SSE mode servers like Zhipu).
 
         This is used for servers that require GET to establish SSE connection.
+        Parses SSE response to extract the message endpoint URL.
         """
         headers = self.config.headers.copy()
 
         async with self.session.get(
             self.config.url,
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=10.0),
+            timeout=aiohttp.ClientTimeout(total=10.0, sock_read=5.0),
         ) as response:
-            # For SSE, we just need to establish the connection
-            # The actual message exchange will happen via POST
             if response.status != 200:
                 text = await response.text()
                 raise RuntimeError(f"SSE connection failed: {response.status} - {text}")
+
+            # SSE is a streaming protocol - read initial content only
+            # Expected format: "event:endpoint\ndata:/api/mcp/wikipedia/message?sessionId=xxx\n\n"
+            content = await asyncio.wait_for(response.content.read(1024), timeout=5.0)
+            text = content.decode('utf-8', errors='ignore')
+            logger.debug(f"SSE response text: {text[:200]}")
+
+            # Look for the data field containing the endpoint URL
+            for line in text.split('\n'):
+                if line.startswith('data:'):
+                    endpoint_path = line[5:].strip()
+                    logger.debug(f"Found data line: {endpoint_path[:100]}")
+                    # Construct full URL from the path
+                    if endpoint_path.startswith('/'):
+                        # Extract base URL from config
+                        from urllib.parse import urlparse
+                        parsed = urlparse(self.config.url)
+                        base_url = f"{parsed.scheme}://{parsed.netloc}"
+                        self._message_endpoint = base_url + endpoint_path
+                    else:
+                        self._message_endpoint = endpoint_path
+                    logger.info(f"Extracted message endpoint: {self._message_endpoint}")
+                    break
+
+            if not self._message_endpoint:
+                logger.error(f"Could not extract endpoint from SSE response. Response: {text[:500]}")
+                raise RuntimeError(f"Failed to extract message endpoint from SSE response. Response: {text[:200]}")
 
     async def _send_post_to_sse_endpoint(self, message: MCPMessage) -> MCPMessage:
         """Send message to SSE endpoint via POST (for SSE mode servers).
@@ -404,6 +444,10 @@ class MCPSSETransport(MCPTransport):
         Returns:
             Response message
         """
+        # Use the extracted message endpoint URL
+        if not self._message_endpoint:
+            raise RuntimeError("Message endpoint not available - connection may not be properly initialized")
+
         # Generate request ID
         self._request_id += 1
         message.id = self._request_id
@@ -412,16 +456,21 @@ class MCPSSETransport(MCPTransport):
         headers = {"Content-Type": "application/json"}
         headers.update(self.config.headers)
 
-        # Send POST request
+        # Send POST request to the message endpoint
         data = message.model_dump_json(exclude_none=True)
+        logger.debug(f"Sending to {self._message_endpoint}: {data[:200]}")
         try:
             async with self.session.post(
-                self.config.url,
+                self._message_endpoint,
                 data=data,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30.0),
             ) as response:
                 text = await response.text()
+                logger.debug(f"Response status: {response.status}, text: {text[:500]}")
+                if not text.strip():
+                    logger.warning(f"Empty response from {message.method}")
+                    return MCPMessage()
                 response_data = json.loads(text) if text.strip() else {}
                 return MCPMessage(**response_data)
         except asyncio.TimeoutError:

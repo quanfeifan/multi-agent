@@ -258,7 +258,8 @@ async def main() -> None:
 
     manager = MCPToolManager()
     config_dir = get_default_config_dir()
-    servers_file = config_dir / "config" / "mcp_servers.yaml"
+    # servers_file = config_dir / "config" / "mcp_servers.yaml"
+    servers_file = Path('/home/yzq/package/multi-agent/examples/config/mcp_servers_modelscope.yaml')
 
     # Load MCP servers from config
     if servers_file.exists():
