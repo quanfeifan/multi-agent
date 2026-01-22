@@ -8,6 +8,13 @@ This module provides both MCP (external) tools and builtin (local) tools.
 from .fallback import FallbackConfig, FallbackManager
 from .mcp_client import MCPMessage, MCPSSETransport, MCPStdioTransport, MCPTransport, create_mcp_transport
 from .mcp_manager import MCPToolManager, ToolExecutor
+from .mcp_streamable_http import (
+    MCPStreamableHTTPTransport,
+    SessionStore,
+    SSEEvent,
+    SSEEventAggregator,
+    StreamableHTTPSession,
+)
 
 # Builtin tools
 from .builtin import (
@@ -26,6 +33,7 @@ __all__ = [
     "MCPTransport",
     "MCPStdioTransport",
     "MCPSSETransport",
+    "MCPStreamableHTTPTransport",
     "MCPMessage",
     "create_mcp_transport",
     # Manager
@@ -43,4 +51,9 @@ __all__ = [
     "register_network_tools",
     "register_programming_tools",
     "register_system_tools",
+    # Streamable HTTP support
+    "SessionStore",
+    "SSEEvent",
+    "SSEEventAggregator",
+    "StreamableHTTPSession",
 ]

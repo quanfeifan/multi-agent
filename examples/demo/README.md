@@ -25,7 +25,8 @@ Create a `.env` file in the project root:
 
 ```bash
 # Using SiliconFlow (recommended for this demo)
-OPENAI_API_KEY=sk-zmjgbmrbzhxyoizdumwysybvvnymddoxaadubmjrwbrvryvw
+# 获取 API Key: https://siliconflow.cn/
+OPENAI_API_KEY=your_siliconflow_api_key_here
 OPENAI_BASE_URL=https://api.siliconflow.cn/v1
 DEFAULT_MODEL=Qwen/Qwen3-8B
 

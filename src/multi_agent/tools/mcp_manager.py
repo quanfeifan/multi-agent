@@ -128,7 +128,13 @@ class MCPToolManager:
             message = MCPMessage(method="tools/list")
             response = await transport.send_message(message)
 
-            if response.result and "tools" in response.result:
+            # Handle empty responses (SSE servers may return empty results)
+            if not response.result:
+                logger.warning(f"No result returned from tools/list for {server_name}. "
+                               f"The server may not support standard tool discovery.")
+                return
+
+            if "tools" in response.result:
                 for tool_def in response.result["tools"]:
                     tool = Tool(
                         name=tool_def["name"],

@@ -15,24 +15,9 @@ A Python framework for orchestrating AI agents with tool integration, state mach
 
 ## Installation
 
-### From PyPI (when published)
-
-```bash
-pip install multi-agent-framework
-```
-
-### From Source
-
-```bash
-git clone https://github.com/your-org/multi-agent.git
-cd multi-agent
-pip install -e .
-```
-
 ### Development Installation
 
 ```bash
-git clone https://github.com/your-org/multi-agent.git
 cd multi-agent
 pip install -e ".[dev]"
 ```
@@ -46,42 +31,37 @@ export OPENAI_API_KEY="sk-xxxxxxxxxxxxx"
 # or use DeepSeek, GLM, Ollama, etc.
 ```
 
-### 2. Create an agent configuration
-
-```yaml
-# ~/.multi-agent/agents/researcher.yaml
-name: web_researcher
-role: "Searches the web and summarizes findings"
-system_prompt: |
-  You are a research assistant. Use web_search to find information
-  and synthesize findings into a clear summary.
-tools: [web_search]
-max_iterations: 10
-llm_config:
-  endpoint: "https://api.openai.com/v1"
-  model: "gpt-4"
-  api_key_env: "OPENAI_API_KEY"
-  api_type: openai
-  temperature: 0.7
+### 2. Run the demo
+```bash
+python examples/demo/llm_with_builtin_tools_demo.py
 ```
 
-### 3. Run your first task
+## ModelScope MCP Server Integration
 
-```python
-from multi_agent import Agent, Task
+This framework supports integrating MCP (Model Context Protocol) servers for extended capabilities like maps, search, and more.
 
-# Load agent
-agent = Agent.from_config("~/.multi-agent/agents/researcher.yaml")
+**Key Principle**: All MCP tools work through the same unified `ToolExecutor` interface as builtin tools. LLMs can call MCP tools seamlessly without knowing the tool source.
 
-# Create and execute task
-task = Task(
-    description="What are the latest developments in quantum computing?",
-    agent=agent
-)
+**Documentation**:
+- [Integration Guide](docs/modelscope_mcp_integration.md) - Complete documentation with architecture explanation
+- [Quick Start](docs/quickstart_modelscope_mcp.md) - 5-minute setup guide
 
-result = task.run()
-print(result.output)
+**Quick Setup**:
+```bash
+# 1. Copy configuration template
+cp examples/config/mcp_servers_modelscope.yaml ~/.multi-agent/config/mcp_servers.yaml
+
+# 2. Set API key (for services like Amap)
+export AMAP_MAPS_API_KEY="your_api_key_here"
+
+# 3. Verify connection
+python examples/modelscope_mcp/amap_demo.py --verify
 ```
+
+**Examples**:
+- [Amap Demo](examples/modelscope_mcp/amap_demo.py) - High德地图 (Geocoding, weather, routing)
+- [Configuration Template](examples/config/mcp_servers_modelscope.yaml) - YAML config reference
+
 
 
 ## Requirements
