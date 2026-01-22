@@ -3,9 +3,10 @@
 This module defines Tool and MCPServer entities for MCP protocol integration.
 """
 
+from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MCPServerConfigStdio(BaseModel):
@@ -46,20 +47,52 @@ class MCPServerConfigCustom(BaseModel):
     init_params: dict[str, Any] = Field(default_factory=dict, description="Initialization parameters")
 
 
+class MCPServerConfigStreamableHTTP(BaseModel):
+    """Configuration for Streamable HTTP transport.
+
+    Streamable HTTP is the modern standard for remote MCP servers (March 2025+).
+    Uses a unified /message endpoint with support for both simple HTTP responses
+    and SSE streaming responses.
+
+    Attributes:
+        url: MCP endpoint URL
+        headers: HTTP headers for authentication
+        timeout: Request timeout in seconds
+        retry_max_attempts: Maximum number of retry attempts
+        retry_base_delay: Base delay for exponential backoff in seconds
+        session_ttl: Session time-to-live in seconds
+    """
+
+    url: str = Field(..., description="MCP endpoint URL (e.g., https://api.example.com/mcp/message)")
+    headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers to include in all requests")
+    timeout: int = Field(default=30, ge=1, description="Request timeout in seconds")
+    retry_max_attempts: int = Field(default=3, ge=0, description="Maximum number of retry attempts")
+    retry_base_delay: float = Field(default=1.0, ge=0, description="Base delay for exponential backoff in seconds")
+    session_ttl: int = Field(default=3600, ge=60, description="Session time-to-live in seconds")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        """Validate that URL starts with http:// or https://."""
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
+
 class MCPServer(BaseModel):
     """Represents an MCP server connection.
 
     Attributes:
         name: Server identifier
-        transport: Transport type ("stdio" or "sse" or "custom")
+        transport: Transport type ("stdio", "sse", "streamable-http", or "custom")
         config: Connection parameters
         description: Server description
         enabled: Whether this server is enabled
     """
 
     name: str = Field(..., description="Server identifier")
-    transport: Literal["stdio", "sse", "custom"] = Field(..., description="Transport type")
-    config: MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigCustom = Field(
+    transport: Literal["stdio", "sse", "streamable-http", "custom"] = Field(..., description="Transport type")
+    config: MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigStreamableHTTP | MCPServerConfigCustom = Field(
         ..., description="Connection parameters"
     )
     description: Optional[str] = Field(None, description="Server description")
@@ -82,6 +115,15 @@ class MCPServer(BaseModel):
             True if transport is "sse"
         """
         return self.transport == "sse"
+
+    @property
+    def is_streamable_http(self) -> bool:
+        """Check if this is a Streamable HTTP transport server.
+
+        Returns:
+            True if transport is "streamable-http"
+        """
+        return self.transport == "streamable-http"
 
     @property
     def is_custom(self) -> bool:

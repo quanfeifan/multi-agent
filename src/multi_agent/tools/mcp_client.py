@@ -11,7 +11,7 @@ from typing import Any, Optional
 import aiohttp
 from pydantic import BaseModel
 
-from ..models import MCPServer, MCPServerConfigSSE, MCPServerConfigStdio
+from ..models import MCPServer, MCPServerConfigSSE, MCPServerConfigStdio, MCPServerConfigStreamableHTTP
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -269,7 +269,7 @@ class MCPSSETransport(MCPTransport):
     Communicates with MCP server via SSE HTTP endpoint.
     Supports two modes:
     - POST-based: Standard JSON-RPC over HTTP POST (MCP spec)
-    - SSE-based: GET for connection + POST for messages (Zhipu style)
+    - SSE-based: GET for connection + POST for messages, responses via SSE stream (Zhipu style)
     """
 
     def __init__(self, config: MCPServerConfigSSE, server_name: str) -> None:
@@ -286,6 +286,10 @@ class MCPSSETransport(MCPTransport):
         self._connected = False
         self._use_sse_mode = False  # Will be detected during connect
         self._message_endpoint: str | None = None  # Dynamic endpoint for SSE mode
+        self._sse_response: aiohttp.ClientResponse | None = None  # Keep SSE connection open
+        self._sse_read_task: asyncio.Task | None = None  # Task to read SSE stream
+        self._pending_requests: dict[int, asyncio.Future] = {}  # Pending requests for SSE mode
+        self._sse_stream_active: bool = False  # Track if SSE stream is still active
 
     async def connect(self) -> None:
         """Connect to SSE endpoint."""
@@ -313,10 +317,12 @@ class MCPSSETransport(MCPTransport):
             logger.info(f"Connected to '{self.server_name}' using POST mode")
         except Exception as e:
             logger.debug(f"POST mode failed: {e}, trying SSE mode...")
-            # Try SSE mode (GET for connection)
+            # Try SSE mode (GET for connection + keep alive for responses)
             try:
                 await self._send_get_init()
                 self._use_sse_mode = True
+                # Start listening for SSE responses in background
+                self._sse_read_task = asyncio.create_task(self._read_sse_stream())
                 # Now send the initialize request to the message endpoint
                 init_message = MCPMessage(
                     method="initialize",
@@ -338,8 +344,32 @@ class MCPSSETransport(MCPTransport):
 
     async def disconnect(self) -> None:
         """Close SSE connection."""
+        # Cancel SSE read task
+        if self._sse_read_task:
+            self._sse_read_task.cancel()
+            try:
+                await self._sse_read_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass  # Ignore errors during cleanup
+
+        # Close SSE response
+        if self._sse_response:
+            try:
+                self._sse_response.close()
+            except Exception:
+                pass  # Ignore errors during cleanup
+
+        # Close session
         if self.session:
             await self.session.close()
+
+        # Cancel pending requests
+        for future in self._pending_requests.values():
+            future.cancel()
+        self._pending_requests.clear()
+
         self._connected = False
 
     async def send_message(self, message: MCPMessage) -> MCPMessage:
@@ -396,47 +426,58 @@ class MCPSSETransport(MCPTransport):
 
         This is used for servers that require GET to establish SSE connection.
         Parses SSE response to extract the message endpoint URL.
+        Keeps the SSE connection open for reading responses.
         """
         headers = self.config.headers.copy()
 
-        async with self.session.get(
+        # Don't use async with - we need to keep the connection open
+        response = await self.session.get(
             self.config.url,
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=10.0, sock_read=5.0),
-        ) as response:
-            if response.status != 200:
-                text = await response.text()
-                raise RuntimeError(f"SSE connection failed: {response.status} - {text}")
+            timeout=aiohttp.ClientTimeout(total=300.0, sock_connect=10.0, sock_read=300.0),
+        )
 
-            # SSE is a streaming protocol - read initial content only
-            # Expected format: "event:endpoint\ndata:/api/mcp/wikipedia/message?sessionId=xxx\n\n"
-            content = await asyncio.wait_for(response.content.read(1024), timeout=5.0)
-            text = content.decode('utf-8', errors='ignore')
-            logger.debug(f"SSE response text: {text[:200]}")
+        if response.status != 200:
+            text = await response.text()
+            await response.close()
+            raise RuntimeError(f"SSE connection failed: {response.status} - {text}")
 
-            # Look for the data field containing the endpoint URL
-            for line in text.split('\n'):
-                if line.startswith('data:'):
-                    endpoint_path = line[5:].strip()
-                    logger.debug(f"Found data line: {endpoint_path[:100]}")
-                    # Construct full URL from the path
-                    if endpoint_path.startswith('/'):
-                        # Extract base URL from config
-                        from urllib.parse import urlparse
-                        parsed = urlparse(self.config.url)
-                        base_url = f"{parsed.scheme}://{parsed.netloc}"
-                        self._message_endpoint = base_url + endpoint_path
-                    else:
-                        self._message_endpoint = endpoint_path
-                    logger.info(f"Extracted message endpoint: {self._message_endpoint}")
-                    break
+        # Store the response for later reading
+        self._sse_response = response
 
-            if not self._message_endpoint:
-                logger.error(f"Could not extract endpoint from SSE response. Response: {text[:500]}")
-                raise RuntimeError(f"Failed to extract message endpoint from SSE response. Response: {text[:200]}")
+        # SSE is a streaming protocol - read initial content only
+        # Expected format: "event:endpoint\ndata:/api/mcp/wikipedia/message?sessionId=xxx\n\n"
+        content = await asyncio.wait_for(response.content.read(1024), timeout=5.0)
+        text = content.decode('utf-8', errors='ignore')
+        logger.debug(f"SSE response text: {text[:200]}")
+
+        # Look for the data field containing the endpoint URL
+        for line in text.split('\n'):
+            if line.startswith('data:'):
+                endpoint_path = line[5:].strip()
+                logger.debug(f"Found data line: {endpoint_path[:100]}")
+                # Construct full URL from the path
+                if endpoint_path.startswith('/'):
+                    # Extract base URL from config
+                    from urllib.parse import urlparse
+                    parsed = urlparse(self.config.url)
+                    base_url = f"{parsed.scheme}://{parsed.netloc}"
+                    self._message_endpoint = base_url + endpoint_path
+                else:
+                    self._message_endpoint = endpoint_path
+                logger.info(f"Extracted message endpoint: {self._message_endpoint}")
+                break
+
+        if not self._message_endpoint:
+            logger.error(f"Could not extract endpoint from SSE response. Response: {text[:500]}")
+            await response.close()
+            raise RuntimeError(f"Failed to extract message endpoint from SSE response. Response: {text[:200]}")
 
     async def _send_post_to_sse_endpoint(self, message: MCPMessage) -> MCPMessage:
         """Send message to SSE endpoint via POST (for SSE mode servers).
+
+        The response will come through the SSE stream, not as the HTTP response.
+        This method sends the POST request and waits for the response via the SSE stream.
 
         Args:
             message: Message to send
@@ -444,19 +485,27 @@ class MCPSSETransport(MCPTransport):
         Returns:
             Response message
         """
+        # Ensure SSE connection is active before sending
+        await self._ensure_sse_connection()
+
         # Use the extracted message endpoint URL
         if not self._message_endpoint:
             raise RuntimeError("Message endpoint not available - connection may not be properly initialized")
 
         # Generate request ID
         self._request_id += 1
-        message.id = self._request_id
+        request_id = self._request_id
+        message.id = request_id
+
+        # Create a future for the response
+        future: asyncio.Future = asyncio.Future()
+        self._pending_requests[request_id] = future
 
         # Prepare headers
         headers = {"Content-Type": "application/json"}
         headers.update(self.config.headers)
 
-        # Send POST request to the message endpoint
+        # Send POST request to the message endpoint (fire and forget - response comes via SSE)
         data = message.model_dump_json(exclude_none=True)
         logger.debug(f"Sending to {self._message_endpoint}: {data[:200]}")
         try:
@@ -464,17 +513,120 @@ class MCPSSETransport(MCPTransport):
                 self._message_endpoint,
                 data=data,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=30.0),
+                timeout=aiohttp.ClientTimeout(total=10.0),
             ) as response:
-                text = await response.text()
-                logger.debug(f"Response status: {response.status}, text: {text[:500]}")
-                if not text.strip():
-                    logger.warning(f"Empty response from {message.method}")
-                    return MCPMessage()
-                response_data = json.loads(text) if text.strip() else {}
-                return MCPMessage(**response_data)
+                # For SSE mode, the HTTP response is usually empty - the real response comes via SSE stream
+                if response.status != 200:
+                    text = await response.text()
+                    logger.error(f"POST request failed: {response.status} - {text}")
+                    del self._pending_requests[request_id]
+                    future.cancel()
+                    raise RuntimeError(f"POST request failed: {response.status} - {text}")
+                logger.debug(f"POST request sent, status: {response.status}")
         except asyncio.TimeoutError:
-            raise TimeoutError(f"MCP request timed out: {message.method}")
+            del self._pending_requests[request_id]
+            future.cancel()
+            raise TimeoutError(f"MCP POST request timed out: {message.method}")
+
+        # Wait for response via SSE stream
+        try:
+            response_data = await asyncio.wait_for(future, timeout=30.0)
+            return MCPMessage(**response_data)
+        except asyncio.TimeoutError:
+            del self._pending_requests[request_id]
+            raise TimeoutError(f"MCP request timed out waiting for SSE response: {message.method}")
+
+    async def _ensure_sse_connection(self) -> None:
+        """Ensure SSE connection is active, reconnect if needed.
+
+        This checks if the SSE stream reader is still running and reconnects if it has stopped.
+        Only reconnects if we had an established connection before (i.e., _sse_read_task exists).
+        """
+        # Only check if we've had a connection before
+        if self._sse_read_task is not None:
+            if self._sse_read_task.done() or not self._sse_stream_active:
+                logger.debug("SSE connection inactive, reconnecting...")
+                # Close existing connection if any
+                if self._sse_response:
+                    try:
+                        self._sse_response.close()
+                    except Exception:
+                        pass
+                if self._sse_read_task and not self._sse_read_task.done():
+                    self._sse_read_task.cancel()
+                    try:
+                        await self._sse_read_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+
+                # Re-establish SSE connection
+                await self._send_get_init()
+                self._sse_read_task = asyncio.create_task(self._read_sse_stream())
+                logger.debug("SSE connection re-established")
+
+    async def _read_sse_stream(self) -> None:
+        """Read SSE stream and dispatch responses to pending requests.
+
+        This runs in a background task and keeps reading from the SSE connection.
+        When a response arrives, it matches the request ID and delivers it to the waiting future.
+        """
+        if not self._sse_response:
+            logger.error("SSE response not available for reading")
+            return
+
+        logger.debug("Starting SSE stream reader")
+        self._sse_stream_active = True
+        buffer = ""
+
+        try:
+            async for chunk in self._sse_response.content:
+                # Decode chunk
+                chunk_text = chunk.decode("utf-8", errors="ignore")
+                buffer += chunk_text
+
+                # Process buffer for complete SSE events
+                # SSE format: "event: xxx\ndata: {...}\n\n"
+                while '\n\n' in buffer:
+                    # Extract one complete event
+                    event_text, buffer = buffer.split('\n\n', 1)
+
+                    # Parse the event
+                    lines = event_text.split('\n')
+                    event_type = "message"
+                    data_json = None
+
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        if line.startswith('event:'):
+                            event_type = line[6:].strip()
+                        elif line.startswith('data:'):
+                            json_str = line[5:].strip()
+                            if json_str:
+                                try:
+                                    data_json = json.loads(json_str)
+                                except json.JSONDecodeError:
+                                    pass  # Skip invalid JSON
+
+                    # If we have data, dispatch to pending request
+                    if data_json:
+                        response_id = data_json.get('id')
+                        if response_id is not None and response_id in self._pending_requests:
+                            future = self._pending_requests.pop(response_id)
+                            if not future.cancelled():
+                                future.set_result(data_json)
+
+        except asyncio.CancelledError:
+            logger.debug("SSE stream reader cancelled")
+        except Exception as e:
+            logger.error(f"Error reading SSE stream: {e}", exc_info=True)
+        finally:
+            self._sse_stream_active = False
+            logger.debug("SSE stream reader ended")
 
     def is_connected(self) -> bool:
         """Check if connected.
@@ -501,5 +653,9 @@ def create_mcp_transport(server: MCPServer) -> MCPTransport:
         return MCPStdioTransport(server.config, server.name)  # type: ignore
     elif server.is_sse:
         return MCPSSETransport(server.config, server.name)  # type: ignore
+    elif server.is_streamable_http:
+        # Import here to avoid circular dependency
+        from .mcp_streamable_http import MCPStreamableHTTPTransport
+        return MCPStreamableHTTPTransport(server.config, server.name)  # type: ignore
     else:
         raise ValueError(f"Unsupported transport type: {server.transport}")

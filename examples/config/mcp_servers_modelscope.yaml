@@ -65,7 +65,9 @@ wiki:
 
     # HTTP 请求头 / HTTP headers
     headers:
-      # Bearer Token 认证 / Bearer Token authentication
+      # Bearer Token 认证 / Bearer Token authentication (不带 Bearer 前缀 / without Bearer prefix)
+      # 获取方式 / How to get: 访问 https://open.bigmodel.cn/ 注册并获取 API key
+      #                       Visit https://open.bigmodel.cn/ to register and get API key
       Authorization: "bc3526aa5b26489bb33a72a27095b634.nGVsWF9BhZb2mF3A"
 
   # 服务器描述 / Server description
@@ -73,4 +75,38 @@ wiki:
 
   # 是否启用 / Whether enabled
   enabled: true
+
+# ============================================================================
+# 智谱 Web 搜索 MCP 服务器 / Zhipu Web Search MCP Server
+# ============================================================================
+# 功能 / Features: 网络搜索、实时信息检索
+#                   Web search, real-time information retrieval
+# 传输方式 / Transport: sse (HTTP Server-Sent Events)
+# 认证方式 / Auth: 需要智谱API密钥 / Requires Zhipu API key
+# 获取方式 / How to get: 访问 https://open.bigmodel.cn/ 注册并获取 API Key
+#                       Visit https://open.bigmodel.cn/ to register and get API key
+web-search:
+  # 传输类型: sse (HTTP Server-Sent Events)
+  # Transport type: sse (HTTP Server-Sent Events)
+  transport: sse
+
+  # 服务器配置 / Server configuration
+  config:
+    # SSE 端点 URL / SSE endpoint URL
+    url: "https://open.bigmodel.cn/api/mcp-broker/proxy/web-search/sse"
+
+    # HTTP 请求头 / HTTP headers
+    headers:
+      # Bearer Token 认证 / Bearer Token authentication (不带 Bearer 前缀 / without Bearer prefix)
+      # 获取方式 / How to get: 访问 https://open.bigmodel.cn/ 注册并获取 API key
+      #                       Visit https://open.bigmodel.cn/ to register and get API key
+      Authorization: "bc3526aa5b26489bb33a72a27095b634.nGVsWF9BhZb2mF3A"
+
+  # 服务器描述 / Server description
+  description: "智谱 Web 搜索服务 - 提供网络搜索和实时信息检索功能 / Zhipu Web Search Service - Web search and real-time info retrieval"
+
+  # 是否启用 / Whether enabled
+  enabled: true
+
+
 

@@ -48,6 +48,38 @@ class MCPServerConfigSSE(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers")
 
 
+class MCPServerConfigStreamableHTTP(BaseModel):
+    """Configuration for Streamable HTTP transport.
+
+    Streamable HTTP is the modern standard for remote MCP servers (March 2025+).
+    Uses a unified /message endpoint with support for both simple HTTP responses
+    and SSE streaming responses.
+
+    Attributes:
+        url: MCP endpoint URL
+        headers: HTTP headers for authentication
+        timeout: Request timeout in seconds
+        retry_max_attempts: Maximum number of retry attempts
+        retry_base_delay: Base delay for exponential backoff in seconds
+        session_ttl: Session time-to-live in seconds
+    """
+
+    url: str = Field(..., description="MCP endpoint URL")
+    headers: dict[str, str] = Field(default_factory=dict, description="HTTP headers")
+    timeout: int = Field(default=30, ge=1, description="Request timeout in seconds")
+    retry_max_attempts: int = Field(default=3, ge=0, description="Maximum number of retry attempts")
+    retry_base_delay: float = Field(default=1.0, ge=0, description="Base delay for exponential backoff in seconds")
+    session_ttl: int = Field(default=3600, ge=60, description="Session time-to-live in seconds")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        """Validate that URL starts with http:// or https://."""
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
+
 class MCPServerConfigCustom(BaseModel):
     """Configuration for custom transport."""
 
@@ -59,8 +91,8 @@ class MCPServerConfig(BaseModel):
     """Configuration for an MCP server connection."""
 
     description: str | None = Field(None, description="Server description")
-    transport: Literal["stdio", "sse", "custom"] = Field(..., description="Transport type")
-    config: MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigCustom = Field(
+    transport: Literal["stdio", "sse", "streamable-http", "custom"] = Field(..., description="Transport type")
+    config: MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigStreamableHTTP | MCPServerConfigCustom = Field(
         ..., description="Transport-specific configuration"
     )
     enabled: bool = Field(default=True, description="Whether this server is enabled")
@@ -68,14 +100,16 @@ class MCPServerConfig(BaseModel):
     @field_validator("config")
     @classmethod
     def validate_config_matches_transport(
-        cls, v: MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigCustom, info
-    ) -> MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigCustom:
+        cls, v: MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigStreamableHTTP | MCPServerConfigCustom, info
+    ) -> MCPServerConfigStdio | MCPServerConfigSSE | MCPServerConfigStreamableHTTP | MCPServerConfigCustom:
         """Validate that config type matches transport type."""
         transport = info.data.get("transport")
         if transport == "stdio" and not isinstance(v, MCPServerConfigStdio):
             raise ValueError("stdio transport requires MCPServerConfigStdio config")
         if transport == "sse" and not isinstance(v, MCPServerConfigSSE):
             raise ValueError("sse transport requires MCPServerConfigSSE config")
+        if transport == "streamable-http" and not isinstance(v, MCPServerConfigStreamableHTTP):
+            raise ValueError("streamable-http transport requires MCPServerConfigStreamableHTTP config")
         if transport == "custom" and not isinstance(v, MCPServerConfigCustom):
             raise ValueError("custom transport requires MCPServerConfigCustom config")
         return v
