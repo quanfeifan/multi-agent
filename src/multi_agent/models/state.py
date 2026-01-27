@@ -6,7 +6,7 @@ This module defines the State entity representing the shared execution context.
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolCall(BaseModel):
@@ -18,6 +18,8 @@ class ToolCall(BaseModel):
         tool: Tool name
         arguments: Tool parameters
     """
+
+    model_config = ConfigDict(extra='allow')
 
     id: str = Field(..., description="Unique call ID (UUID v4)")
     server: Optional[str] = Field(None, description="MCP server name")
