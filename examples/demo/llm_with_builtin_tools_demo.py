@@ -23,6 +23,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 from dotenv import load_dotenv
 load_dotenv()
 
+# Disable proxy to avoid unsupported protocol error (socks://)
+# httpx only supports http://, https://, and socks5://
+proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
+for key in proxy_keys:
+    if key in os.environ:
+        del os.environ[key]
+
 from multi_agent.agent.base import LLMClient
 from multi_agent.config.schemas import LLMConfig
 from multi_agent.tools import ToolExecutor

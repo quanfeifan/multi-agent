@@ -117,9 +117,8 @@ class SupervisorAgent(BaseAgent):
             role="assistant",
             content=response["content"],
             tool_calls=[
-                Message.ToolCall(
+                ToolCall(
                     id=tc["id"],
-                    server="sub_agent",
                     tool=tc["tool"],
                     arguments=tc["arguments"],
                 )

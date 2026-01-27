@@ -244,7 +244,7 @@ class BaseAgent:
             )
 
         except Exception as e:
-            logger.error(f"Agent {self.agent.name} execution failed: {e}")
+            logger.error(f"Agent {self.agent.name} execution failed: {type(e).__name__}: {e}", exc_info=True)
             return AgentExecutionResult(
                 output=state.messages[-1].content if state.messages else "",
                 state=state,
@@ -378,9 +378,17 @@ class BaseAgent:
                     }
                     for tc in msg.tool_calls
                 ]
+                # Store tool call IDs for tool result messages
+                if not hasattr(self, '_tool_call_ids'):
+                    self._tool_call_ids = []
+                self._tool_call_ids.extend([tc.id for tc in msg.tool_calls])
+
             # Handle tool_call_id for tool messages
-            elif msg.role == "tool" and msg.tool_calls:
-                message_dict["tool_call_id"] = msg.tool_calls[0].id
+            elif msg.role == "tool" and hasattr(self, '_tool_call_ids') and self._tool_call_ids:
+                # Use the first available tool call ID
+                tool_call_id = self._tool_call_ids.pop(0) if self._tool_call_ids else None
+                if tool_call_id:
+                    message_dict["tool_call_id"] = tool_call_id
 
             messages.append(message_dict)
 
